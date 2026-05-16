@@ -1,0 +1,9 @@
+*.bak
+*.mdf
+*.ldf
+*.ndf
+.env
+*.credentials
+execution_plans/raw/
+anonymization/
+private/
