@@ -9,16 +9,23 @@
 
 | Metric | BEFORE | AFTER |
 |---|---|---|
-| Elapsed time | 5,056 ms | — |
-| CPU time | 233 ms | — |
-| Logical reads (SalesOrders) | 2,856 | — |
-| Logical reads (SalesOrderLines) | 59,618 | — |
-| Total logical reads | 62,474 | — |
-| Rows returned | 12,448 | — |
-| Index seek? | ❌ Full scan | — |
+| Elapsed time | 5,056 ms | 2,053 ms |
+| CPU time | 233 ms | 812 ms* |
+| Logical reads (SalesOrders) | 2,856 | 19 |
+| Logical reads (SalesOrderLines) | 59,618 | 60,418 |
+| Total logical reads | 62,474 | 60,437 |
+| Rows returned | 12,448 | 12,448 |
+| Index seek? | ❌ Full scan | ✅ Index Seek |
+
+*CPU increased due to parallel plan (4 threads); elapsed time is the user-facing metric.
 
 **Anti-pattern:** `WHERE YEAR(OrderDate) = 2024 AND MONTH(OrderDate) = 1`
 wraps the indexed column in a function → SQL Server cannot use the index → full scan on 169K rows.
+
+**Fix:** Explicit date range `>= '2024-01-01' AND < '2024-02-01'` + covering index
+`IX_SalesOrders_Date_Covering (OrderDate, IsCancelled) INCLUDE (OrderId, CustomerId, SalesRepId)`.
+SalesOrders logical reads dropped **99.3%** (2,856 → 19). Elapsed time **-59%**.
+SalesOrderLines still full-scans (no index on OrderId + IsCancelled yet).
 
 ---
 
@@ -54,10 +61,10 @@ will be in plan stability and reads reduction, not raw elapsed time.
 
 ---
 
-## Summary (to be completed after optimization)
+## Summary
 
 | Query | Before (ms) | After (ms) | Improvement |
 |---|---|---|---|
-| Q1 — Sales by Product | 5,056 | — | — |
+| Q1 — Sales by Product | 5,056 | 2,053 | -59% elapsed / -99.3% reads on SalesOrders |
 | Q2 — Overdue Accounts | 343 | — | — |
 | Q3 — Inventory Close | 6,121 | — | — |
