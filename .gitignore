@@ -4,6 +4,6 @@
 *.ndf
 .env
 *.credentials
-execution_plans/raw/
+execution_plans/
 anonymization/
 private/
