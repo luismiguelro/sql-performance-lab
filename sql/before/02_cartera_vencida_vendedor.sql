@@ -1,8 +1,10 @@
 -- ============================================================
 -- QUERY 02 — Overdue accounts by sales rep (SLOW version)
--- Anti-pattern: correlated subquery in SELECT executes one
---   lookup against SalesReps per row in AccountsReceivable
---   → N reads for 182K rows
+-- Anti-patterns:
+--   1. CONVERT on DueDate in WHERE → non-sargable, forces full
+--      scan on 182K rows even if an index existed on DueDate
+--   2. Correlated subquery in SELECT → one lookup against
+--      SalesReps per row returned
 -- ============================================================
 
 SET STATISTICS IO ON;
@@ -18,11 +20,11 @@ SELECT
     ar.OriginalAmount,
     ar.Charges,
     ar.Payments,
-    (ar.OriginalAmount + ar.Charges - ar.Payments)       AS BalanceDue,
-    DATEDIFF(DAY, ar.DueDate, GETDATE())                 AS DaysOverdue
+    (ar.OriginalAmount + ar.Charges - ar.Payments)              AS BalanceDue,
+    DATEDIFF(DAY, ar.DueDate, GETDATE())                        AS DaysOverdue
 FROM AccountsReceivable ar
 WHERE ar.IsCancelled = 0
-  AND ar.DueDate < GETDATE()
+  AND CONVERT(varchar(10), ar.DueDate, 23) < CONVERT(varchar(10), GETDATE(), 23)
   AND (ar.OriginalAmount + ar.Charges - ar.Payments) > 0
 ORDER BY DaysOverdue DESC, ar.SalesRepId;
 

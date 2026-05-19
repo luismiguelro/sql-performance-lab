@@ -29,20 +29,29 @@ SalesOrderLines still full-scans (no index on OrderId + IsCancelled yet).
 
 ---
 
-## Query 02 — Overdue Accounts by Sales Rep (correlated subquery)
+## Query 02 — Overdue Accounts by Sales Rep (non-sargable date + correlated subquery)
 
 | Metric | BEFORE | AFTER |
 |---|---|---|
-| Elapsed time | 343 ms | — |
-| CPU time | 139 ms | — |
-| Logical reads (AccountsReceivable) | 4,958 | — |
-| Logical reads (SalesReps) | 2 | — |
-| Total logical reads | 4,960 | — |
-| Rows returned | 1,781 | — |
+| Elapsed time | 418 ms | 340 ms |
+| CPU time | 153 ms | 0 ms |
+| Logical reads (AccountsReceivable) | 4,958 | 38 |
+| Logical reads (SalesReps) | 2 | 2 |
+| Total logical reads | 4,960 | 40 |
+| Rows returned | 1,868 | 1,872 |
+| Index seek? | ❌ Full scan (scan count 9) | ✅ Index Seek (scan count 1) |
 
-**Anti-pattern:** Correlated subquery in SELECT executes one lookup per row.
-SQL Server partially optimized this case internally; the gain post-optimization
-will be in plan stability and reads reduction, not raw elapsed time.
+**Anti-patterns:**
+1. `CONVERT(varchar(10), DueDate, 23)` en el WHERE → non-sargable, fuerza full scan sobre 182K filas
+2. Correlated subquery en SELECT → lookup a SalesReps por cada fila devuelta
+
+**Fix:**
+- Columna calculada persistida: `BalanceDue AS (OriginalAmount + Charges - Payments) PERSISTED`
+- Índice `IX_AccountsReceivable_Balance_Date (BalanceDue, DueDate, IsCancelled) INCLUDE (...)` con BalanceDue como leading key: SQL Server hace seek directo a las 1,872 filas con saldo, saltándose 180K filas con balance cero
+- LEFT JOIN reemplaza la correlated subquery
+- Direct date comparison replaces `CONVERT(varchar)`
+
+Logical reads: **-99.2%** (4,958 → 38). Scan count: 9 → 1.
 
 ---
 
@@ -66,5 +75,5 @@ will be in plan stability and reads reduction, not raw elapsed time.
 | Query | Before (ms) | After (ms) | Improvement |
 |---|---|---|---|
 | Q1 — Sales by Product | 5,056 | 2,053 | -59% elapsed / -99.3% reads on SalesOrders |
-| Q2 — Overdue Accounts | 343 | — | — |
+| Q2 — Overdue Accounts | 418 | 340 | -19% elapsed / -99.2% reads (4,958 → 38) |
 | Q3 — Inventory Close | 6,121 | — | — |
