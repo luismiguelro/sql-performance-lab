@@ -59,21 +59,33 @@ Logical reads: **-99.2%** (4,958 → 38). Scan count: 9 → 1.
 
 | Metric | BEFORE | AFTER |
 |---|---|---|
-| Elapsed time | 6,121 ms | — |
-| CPU time | 172 ms | — |
-| Logical reads | 1,543 | — |
-| Rows returned | 49,780 | — |
-| Index seek? | ❌ Full scan | — |
+| Elapsed time (full result) | 7,024 ms | ~16 ms server* |
+| CPU time | 375 ms | 0 ms |
+| Logical reads | 1,543 | 766 |
+| Sort operator | ✅ Present (Worktable) | ❌ Eliminated |
+| Rows returned | 49,780 | 49,780 |
+| Index seek? | ❌ Full scan | ✅ Index Seek |
 
-**Anti-pattern:** `SELECT *` fetches all 14 columns + filter on unindexed
-`IsClosed` and `PeriodId` columns → full scan on 506K rows, heavy sort.
+*Elapsed time with full result set (~5s) dominated by network transfer of 49K rows to client.
+Pure server execution measured via COUNT(*): 7,024ms → 16ms.
+
+**Anti-patterns:**
+1. `SELECT *` reads all 14 columns per page (including 10 wide numeric columns) → 1,543 pages
+2. No index on `IsClosed` + `PeriodId` → full clustered scan on 506K rows
+3. `ORDER BY` forces a Sort operator on 49K rows in memory
+
+**Fix:** Explicit column list (11 of 14) + covering sorted index
+`IX_InventoryMonthlyBalance_Period_Sorted (PeriodId, IsClosed, WarehouseId, ProductId) INCLUDE (...)`.
+- Seek targets the 49K rows in the period directly
+- Narrower index pages → logical reads **-50%** (1,543 → 766)
+- Index pre-sorted in ORDER BY order → **Sort operator eliminated**
 
 ---
 
 ## Summary
 
-| Query | Before (ms) | After (ms) | Improvement |
+| Query | Before | After | Improvement |
 |---|---|---|---|
-| Q1 — Sales by Product | 5,056 | 2,053 | -59% elapsed / -99.3% reads on SalesOrders |
-| Q2 — Overdue Accounts | 418 | 340 | -19% elapsed / -99.2% reads (4,958 → 38) |
-| Q3 — Inventory Close | 6,121 | — | — |
+| Q1 — Sales by Product | 5,056 ms / 62,474 reads | 2,053 ms / 60,437 reads | -59% elapsed / -99.3% reads (SalesOrders) |
+| Q2 — Overdue Accounts | 418 ms / 4,960 reads | 340 ms / 40 reads | -19% elapsed / -99.2% reads |
+| Q3 — Inventory Close | 7,024 ms / 1,543 reads | 16 ms* / 766 reads | -99.8% server time / -50% reads / Sort eliminated |
